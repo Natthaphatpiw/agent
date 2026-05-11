@@ -6,6 +6,9 @@ from typing import Any, AsyncIterator
 
 from memory.session import record_memory_event
 
+SESSION_END_MARKER = "<SESSION_END/>"
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "3600"))
+
 
 def _audio_chunks(payload: dict[str, Any]) -> list[str]:
     chunks = payload.get("audio_chunks")
@@ -29,12 +32,16 @@ def _channels(payload: dict[str, Any]) -> int:
     return value if value in {1, 2} else 1
 
 
+def _clean_text(text: str) -> tuple[str, bool]:
+    return text.replace(SESSION_END_MARKER, ""), SESSION_END_MARKER in text
+
+
 def _voice_model(audio_format: str, sample_rate: int, channels: int):
     from strands.experimental.bidi.models import BidiNovaSonicModel
 
     region = os.getenv("VOICE_AWS_REGION") or os.getenv("AWS_REGION") or "us-east-1"
     return BidiNovaSonicModel(
-        model_id=os.getenv("VOICE_MODEL_ID", "amazon.nova-sonic-v1:0"),
+        model_id=os.getenv("VOICE_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
         provider_config={
             "audio": {
                 "input_rate": sample_rate,
@@ -61,12 +68,15 @@ def _event_payload(event: Any) -> dict[str, Any]:
         }
 
     if event_type == "bidi_transcript_stream":
+        text, text_ended = _clean_text(str(event.get("text") or ""))
+        current_transcript, current_ended = _clean_text(str(event.get("current_transcript") or ""))
         return {
             "type": "transcript",
             "role": event.get("role"),
-            "text": event.get("text"),
+            "text": text,
             "is_final": event.get("is_final"),
-            "current_transcript": event.get("current_transcript"),
+            "current_transcript": current_transcript,
+            "session_ended": text_ended or current_ended,
         }
 
     if event_type == "bidi_response_complete":
@@ -132,6 +142,7 @@ async def stream_voice_response(
 
     user_transcripts: list[str] = []
     assistant_transcripts: list[str] = []
+    session_ended = False
 
     try:
         await agent.start(invocation_state={"actor_id": actor_id, "session_id": session_id})
@@ -161,6 +172,7 @@ async def stream_voice_response(
             event_payload = _event_payload(event)
 
             if event_payload["type"] == "transcript" and event_payload.get("is_final"):
+                session_ended = session_ended or bool(event_payload.get("session_ended"))
                 text = str(event_payload.get("current_transcript") or event_payload.get("text") or "").strip()
                 if text and event_payload.get("role") == "user":
                     user_transcripts.append(text)
@@ -179,6 +191,14 @@ async def stream_voice_response(
     finally:
         await agent.stop()
 
+    yield {
+        "type": "session_state",
+        "session_id": session_id,
+        "actor_id": actor_id,
+        "session_ended": session_ended,
+        "ttl_seconds": SESSION_TTL_SECONDS,
+    }
+
     record_memory_event(
         actor_id=actor_id,
         session_id=session_id,
@@ -193,6 +213,6 @@ async def stream_voice_response(
             session_id=session_id,
             role="ASSISTANT",
             text="\n".join(assistant_transcripts),
-            metadata={"input_type": "voice"},
+            metadata={"input_type": "voice", "session_ended": str(session_ended).lower()},
             logger=logger,
         )

@@ -29,6 +29,7 @@ file defines a Starlette ASGI app with the chosen Agent framework SDK running wi
 | `VOICE_MODEL_ID` | No | Voice model ID. Defaults to `amazon.nova-sonic-v1:0` |
 | `VOICE_AWS_REGION` | No | Region for Nova Sonic. Defaults to `us-east-1` |
 | `VOICE_OUTPUT_VOICE` | No | Nova Sonic output voice, for example `ruth` or `matthew` |
+| `SESSION_TTL_SECONDS` | No | Default client session TTL returned to UI/LINE integrations. Defaults to `3600` |
 
 # Developing locally
 
@@ -47,17 +48,29 @@ Text invocation payload:
 ```json
 {
   "input_type": "text",
+  "response_format": "jsonl",
+  "channel": "web",
   "session_id": "session-001",
   "user_id": "user-001",
   "prompt": "ขอข้อมูลของคุณอนงค์หน่อย"
 }
 ```
 
+When `response_format` is `jsonl` or `events`, text responses stream as newline-delimited events:
+
+```json
+{"type":"text_delta","text":"พบข้อมูลครับ"}
+{"type":"session_state","session_id":"session-001","actor_id":"user-001","session_ended":false,"ttl_seconds":3600}
+```
+
+If omitted, responses stream as plain text for CLI compatibility.
+
 Voice invocation payloads use Nova Sonic and expect base64 audio chunks from the client:
 
 ```json
 {
   "input_type": "voice",
+  "channel": "web",
   "session_id": "session-001",
   "user_id": "user-001",
   "audio_format": "pcm",

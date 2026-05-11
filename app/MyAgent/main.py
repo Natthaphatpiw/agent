@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any, AsyncIterator
 
 from strands import Agent
@@ -10,6 +11,10 @@ from voice.bidi import stream_voice_response
 
 app = BedrockAgentCoreApp()
 log = app.logger
+
+SESSION_END_MARKER = "<SESSION_END/>"
+DEEPSEEK_TOOL_MARKER = "<｜DSML｜function_calls"
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "3600"))
 
 DEFAULT_SYSTEM_PROMPT = """
 คุณคือ Agent ฝ่ายบริการลูกค้า พูดภาษาไทยสุภาพ กระชับ และลงท้ายอย่างเหมาะสมด้วย "ครับ" เมื่อเข้ากับบริบท
@@ -36,6 +41,10 @@ DEFAULT_SYSTEM_PROMPT = """
 7. ถ้า user ขอแก้ไขข้อมูล ให้ถาม field และค่าใหม่ที่ต้องการแก้ จากนั้นเรียก update_customer_profile
 
 จัดการบทสนทนาเป็นราย session: อย่าข้ามขั้นตอนใน session เดิม และถ้าข้อมูลไม่ครบให้ถามเพิ่มทีละเรื่องที่จำเป็น
+
+สัญญาณ session:
+- ถ้าผู้ใช้บอกลา ยืนยันว่าไม่มีเรื่องอื่นให้ช่วย หรือ task สำคัญเสร็จสมบูรณ์แล้วและไม่ต้องถามต่อ ให้เติม <SESSION_END/> ไว้ท้ายคำตอบ
+- ห้ามอธิบาย marker นี้ให้ผู้ใช้ และห้ามใส่ marker นี้ถ้ายังต้องรอข้อมูลเพิ่มหรือยังอยู่ระหว่างยืนยันตัวตน/สมัครสมาชิก/แก้ไขข้อมูล
 """
 
 
@@ -84,29 +93,88 @@ def _get_input_type(payload: dict[str, Any]) -> str:
     return "text"
 
 
-def _clean_model_stream_text(text: str) -> str:
-    return text.replace("<｜DSML｜function_calls", "")
+def _get_response_format(payload: dict[str, Any]) -> str:
+    value = payload.get("response_format") or payload.get("stream_format") or "text"
+    return str(value).strip().lower()
 
 
-async def _stream_text_response(prompt: str, session_id: str, actor_id: str) -> AsyncIterator[str]:
+def _event_line(event: dict[str, Any]) -> str:
+    return json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
+def _source_metadata(payload: dict[str, Any], input_type: str) -> dict[str, Any]:
+    return {
+        "input_type": input_type,
+        "channel": payload.get("channel") or payload.get("source") or "unknown",
+        "client_session_id": payload.get("client_session_id"),
+        "line_reply_token": payload.get("line_reply_token"),
+    }
+
+
+class StreamTextCleaner:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.session_ended = False
+        self._markers = (DEEPSEEK_TOOL_MARKER, SESSION_END_MARKER)
+        self._max_marker_len = max(len(marker) for marker in self._markers)
+
+    def feed(self, chunk: str) -> str:
+        text = self._buffer + chunk
+        if SESSION_END_MARKER in text:
+            self.session_ended = True
+
+        for marker in self._markers:
+            text = text.replace(marker, "")
+
+        keep = max(self._max_marker_len - 1, 0)
+        if len(text) <= keep:
+            self._buffer = text
+            return ""
+
+        output = text[:-keep]
+        self._buffer = text[-keep:]
+        return output
+
+    def flush(self) -> str:
+        text = self._buffer
+        self._buffer = ""
+        if SESSION_END_MARKER in text:
+            self.session_ended = True
+        for marker in self._markers:
+            text = text.replace(marker, "")
+        return text
+
+
+async def _stream_text_events(
+    prompt: str,
+    session_id: str,
+    actor_id: str,
+    metadata: dict[str, Any],
+) -> AsyncIterator[dict[str, Any]]:
     agent = get_or_create_agent(session_id, actor_id)
     response_parts: list[str] = []
+    cleaner = StreamTextCleaner()
 
     record_memory_event(
         actor_id=actor_id,
         session_id=session_id,
         role="USER",
         text=prompt,
-        metadata={"input_type": "text"},
+        metadata=metadata,
         logger=log,
     )
 
     async for event in agent.stream_async(prompt):
         if "data" in event and isinstance(event["data"], str):
-            text = _clean_model_stream_text(event["data"])
+            text = cleaner.feed(event["data"])
             if text:
                 response_parts.append(text)
-                yield text
+                yield {"type": "text_delta", "text": text}
+
+    tail = cleaner.flush()
+    if tail:
+        response_parts.append(tail)
+        yield {"type": "text_delta", "text": tail}
 
     response_text = "".join(response_parts).strip()
     if response_text:
@@ -115,9 +183,31 @@ async def _stream_text_response(prompt: str, session_id: str, actor_id: str) -> 
             session_id=session_id,
             role="ASSISTANT",
             text=response_text,
-            metadata={"input_type": "text"},
+            metadata={**metadata, "session_ended": str(cleaner.session_ended).lower()},
             logger=log,
         )
+
+    yield {
+        "type": "session_state",
+        "session_id": session_id,
+        "actor_id": actor_id,
+        "session_ended": cleaner.session_ended,
+        "ttl_seconds": SESSION_TTL_SECONDS,
+    }
+
+
+async def _stream_text_response(
+    prompt: str,
+    session_id: str,
+    actor_id: str,
+    metadata: dict[str, Any],
+    response_format: str,
+) -> AsyncIterator[str]:
+    async for event in _stream_text_events(prompt, session_id, actor_id, metadata):
+        if response_format in {"events", "jsonl"}:
+            yield _event_line(event)
+        elif event.get("type") == "text_delta":
+            yield str(event.get("text", ""))
 
 
 @app.entrypoint
@@ -132,6 +222,7 @@ async def invoke(payload, context):
         or _get_context_value(context, "user_id", "actor_id", default="default-user")
     )
     input_type = _get_input_type(payload)
+    response_format = _get_response_format(payload)
 
     if input_type in {"voice", "audio"}:
         async for voice_event in stream_voice_response(
@@ -142,7 +233,7 @@ async def invoke(payload, context):
             actor_id=actor_id,
             logger=log,
         ):
-            yield json.dumps(voice_event, ensure_ascii=False) + "\n"
+            yield _event_line(voice_event)
         return
 
     prompt = _get_payload_text(payload)
@@ -150,7 +241,8 @@ async def invoke(payload, context):
         yield "กรุณาส่งข้อความใน field `prompt` หรือ `text` ครับ"
         return
 
-    async for chunk in _stream_text_response(prompt, session_id, actor_id):
+    metadata = _source_metadata(payload, input_type="text")
+    async for chunk in _stream_text_response(prompt, session_id, actor_id, metadata, response_format):
         yield chunk
 
 
