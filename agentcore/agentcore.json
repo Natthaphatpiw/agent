@@ -14,21 +14,83 @@
       "entrypoint": "main.py",
       "codeLocation": "app/MyAgent/",
       "runtimeVersion": "PYTHON_3_14",
+      "envVars": [
+        {
+          "name": "AWS_REGION",
+          "value": "ap-southeast-2"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "ap-southeast-2"
+        },
+        {
+          "name": "TEXT_MODEL_ID",
+          "value": "deepseek.v3.2"
+        },
+        {
+          "name": "CUSTOMER_DB_GATEWAY_URL",
+          "value": "https://gateway-to-data-u0xeqh4hml.gateway.bedrock-agentcore.ap-southeast-2.amazonaws.com/mcp"
+        },
+        {
+          "name": "CUSTOMER_DB_GATEWAY_BEARER_TOKEN",
+          "value": ""
+        },
+        {
+          "name": "AGENTCORE_MEMORY_ID",
+          "value": "memory_4h2mo-sMHRRLGKBJ"
+        },
+        {
+          "name": "AGENTCORE_MEMORY_ARN",
+          "value": "arn:aws:bedrock-agentcore:ap-southeast-2:885418708466:memory/memory_4h2mo-sMHRRLGKBJ"
+        },
+        {
+          "name": "AGENTCORE_RECORD_EVENTS",
+          "value": "1"
+        },
+        {
+          "name": "VOICE_MODEL_ID",
+          "value": "amazon.nova-sonic-v1:0"
+        },
+        {
+          "name": "VOICE_AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "VOICE_OUTPUT_VOICE",
+          "value": "ruth"
+        },
+        {
+          "name": "VOICE_TIMEOUT_SECONDS",
+          "value": "30"
+        }
+      ],
       "networkMode": "PUBLIC",
       "protocol": "HTTP"
     }
   ],
-  "memories": [
-    {
-      "name": "MyAgentMemory",
-      "eventExpiryDuration": 30,
-      "strategies": []
-    }
-  ],
+  "memories": [],
   "credentials": [],
   "evaluators": [],
   "onlineEvalConfigs": [],
-  "agentCoreGateways": [],
+  "agentCoreGateways": [
+    {
+      "name": "CustomerDbGateway",
+      "description": "MCP gateway exposing customer database tools backed by a Supabase Lambda target.",
+      "targets": [
+        {
+          "name": "CustomerDbTools",
+          "targetType": "lambdaFunctionArn",
+          "lambdaFunctionArn": {
+            "lambdaArn": "arn:aws:lambda:ap-southeast-2:885418708466:function:agent-piw-data",
+            "toolSchemaFile": "agentcore/gateway/customer_db_tools.schema.json"
+          }
+        }
+      ],
+      "authorizerType": "NONE",
+      "enableSemanticSearch": true,
+      "exceptionLevel": "NONE"
+    }
+  ],
   "policyEngines": [],
   "configBundles": [],
   "abTests": [],

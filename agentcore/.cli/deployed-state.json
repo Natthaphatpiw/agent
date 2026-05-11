@@ -1,3 +1,25 @@
 {
-  "targets": {}
+  "targets": {
+    "dev": {
+      "resources": {
+        "runtimes": {
+          "MyAgent": {
+            "runtimeId": "agentP_MyAgent-dZmbmm3KDS",
+            "runtimeArn": "arn:aws:bedrock-agentcore:ap-southeast-2:885418708466:runtime/agentP_MyAgent-dZmbmm3KDS",
+            "roleArn": "arn:aws:iam::885418708466:role/AgentCore-agentP-dev-ApplicationAgentMyAgentRuntime-fmDAphL4iiom"
+          }
+        },
+        "mcp": {
+          "gateways": {
+            "CustomerDbGateway": {
+              "gatewayId": "agentp-customerdbgateway-tn68jhxls4",
+              "gatewayArn": "arn:aws:bedrock-agentcore:ap-southeast-2:885418708466:gateway/agentp-customerdbgateway-tn68jhxls4",
+              "gatewayUrl": "https://agentp-customerdbgateway-tn68jhxls4.gateway.bedrock-agentcore.ap-southeast-2.amazonaws.com/mcp"
+            }
+          }
+        },
+        "stackName": "AgentCore-agentP-dev"
+      }
+    }
+  }
 }

@@ -18,6 +18,17 @@ file defines a Starlette ASGI app with the chosen Agent framework SDK running wi
 | Variable | Required | Description |
 | --- | --- | --- |
 | `LOCAL_DEV` | No | Set to `1` to use `.env.local` instead of AgentCore Identity |
+| `AWS_REGION` / `AWS_DEFAULT_REGION` | Yes for local dev | AWS region used by Bedrock and AgentCore Memory clients |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Yes for local dev unless using an AWS profile | Local AWS credentials with Bedrock model access |
+| `TEXT_MODEL_ID` | No | Bedrock text model ID. Defaults to `deepseek.v3.2` |
+| `CUSTOMER_DB_GATEWAY_URL` | Yes | AgentCore Gateway MCP URL for the customer database tools |
+| `CUSTOMER_DB_GATEWAY_BEARER_TOKEN` | No | Bearer token if the gateway uses `CUSTOM_JWT` |
+| `AGENTCORE_MEMORY_ID` | No | Existing AgentCore Memory ID to use for explicit event recording |
+| `AGENTCORE_MEMORY_ARN` | No | Existing AgentCore Memory ARN used by CDK to grant runtime permissions |
+| `AGENTCORE_RECORD_EVENTS` | No | Set to `0` to disable explicit `create_event` calls |
+| `VOICE_MODEL_ID` | No | Voice model ID. Defaults to `amazon.nova-sonic-v1:0` |
+| `VOICE_AWS_REGION` | No | Region for Nova Sonic. Defaults to `us-east-1` |
+| `VOICE_OUTPUT_VOICE` | No | Nova Sonic output voice, for example `ruth` or `matthew` |
 
 # Developing locally
 
@@ -30,6 +41,31 @@ Run `source .venv/bin/activate` before developing.
 In a new terminal, you can invoke that server with:
 
 `agentcore invoke --dev "What can you do"`
+
+Text invocation payload:
+
+```json
+{
+  "input_type": "text",
+  "session_id": "session-001",
+  "user_id": "user-001",
+  "prompt": "ขอข้อมูลของคุณอนงค์หน่อย"
+}
+```
+
+Voice invocation payloads use Nova Sonic and expect base64 audio chunks from the client:
+
+```json
+{
+  "input_type": "voice",
+  "session_id": "session-001",
+  "user_id": "user-001",
+  "audio_format": "pcm",
+  "sample_rate": 16000,
+  "channels": 1,
+  "audio_chunks": ["BASE64_PCM_CHUNK"]
+}
+```
 
 # Deployment
 

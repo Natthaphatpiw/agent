@@ -1,0 +1,159 @@
+[
+  {
+    "name": "search_customer_by_name",
+    "description": "Search customers by Thai or English name. Use this before claiming whether a person exists. Returns likely matches and suggestions without private profile details.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name or partial name from the user, for example อนงค์"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of matches or suggestions to return"
+        }
+      },
+      "required": ["name"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "query": { "type": "string" },
+        "matches": { "type": "array", "items": { "type": "object" } },
+        "suggestions": { "type": "array", "items": { "type": "object" } }
+      }
+    }
+  },
+  {
+    "name": "verify_customer_identity",
+    "description": "Verify a customer with phone number and the answer to their stored security question. Use before reading or updating private data.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "Customer UUID returned by search_customer_by_name"
+        },
+        "phone_number": {
+          "type": "string",
+          "description": "Phone number provided by the user"
+        },
+        "security_answer": {
+          "type": "string",
+          "description": "Answer provided by the user for the stored security question"
+        }
+      },
+      "required": ["customer_id", "phone_number", "security_answer"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "verified": { "type": "boolean" },
+        "reason": { "type": "string" },
+        "verification_token": { "type": "string" },
+        "customer": { "type": "object" }
+      }
+    }
+  },
+  {
+    "name": "get_customer_profile",
+    "description": "Read a customer's private profile after identity verification. Requires the verification token from verify_customer_identity.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "Customer UUID"
+        },
+        "verification_token": {
+          "type": "string",
+          "description": "Verification token returned by verify_customer_identity"
+        }
+      },
+      "required": ["customer_id", "verification_token"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "customer": { "type": "object" }
+      }
+    }
+  },
+  {
+    "name": "update_customer_profile",
+    "description": "Update allowed customer profile fields after identity verification. Requires the verification token from verify_customer_identity.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "description": "Customer UUID"
+        },
+        "verification_token": {
+          "type": "string",
+          "description": "Verification token returned by verify_customer_identity"
+        },
+        "updates": {
+          "type": "object",
+          "description": "Fields to update. Allowed keys: full_name, phone_number, email, address, notes, membership_status"
+        }
+      },
+      "required": ["customer_id", "verification_token", "updates"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "customer": { "type": "object" }
+      }
+    }
+  },
+  {
+    "name": "register_customer",
+    "description": "Create a new customer membership record after the user provides registration details and chooses a security question and answer.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "full_name": {
+          "type": "string",
+          "description": "Customer full name"
+        },
+        "phone_number": {
+          "type": "string",
+          "description": "Customer phone number"
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional email address"
+        },
+        "address": {
+          "type": "string",
+          "description": "Optional address"
+        },
+        "security_question": {
+          "type": "string",
+          "description": "Question selected by the customer for future identity verification"
+        },
+        "security_answer": {
+          "type": "string",
+          "description": "Answer to the security question. This will be hashed in the database."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional staff notes"
+        }
+      },
+      "required": ["full_name", "phone_number", "security_question", "security_answer"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "customer": { "type": "object" }
+      }
+    }
+  }
+]
