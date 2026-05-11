@@ -7,9 +7,23 @@ import {
   showLineLoadingAnimation,
   verifyLineSignature,
 } from "@/lib/line";
-import { getOrCreateChatSession, markChatSessionEnded, touchChatSession } from "@/lib/sessions";
+import {
+  claimLineDebouncedTextEvents,
+  finishLineTurn,
+  getOrCreateChatSession,
+  markChatSessionEnded,
+  markLineMessageEventDropped,
+  markLineMessageEventsProcessed,
+  markLineTurnProcessing,
+  readChatSessionByAgentSessionId,
+  registerLineTextMessageEvent,
+  startLineDebounceTurn,
+} from "@/lib/sessions";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const LINE_DEBOUNCE_MS = 5000;
 
 type LineWebhookBody = {
   events?: LineWebhookEvent[];
@@ -28,6 +42,12 @@ type LineWebhookEvent = {
   };
 };
 
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function safelyShowLineLoading(chatId: string, loadingSeconds = 30) {
   try {
     await showLineLoadingAnimation(chatId, loadingSeconds);
@@ -36,12 +56,25 @@ async function safelyShowLineLoading(chatId: string, loadingSeconds = 30) {
   }
 }
 
+async function releaseLineTurn(agentSessionId: string) {
+  try {
+    await finishLineTurn(agentSessionId);
+  } catch (error) {
+    console.warn("Unable to release LINE turn lock", error);
+  }
+}
+
+function shouldLeaveForDebounce(turnStatus?: string, lockedUntil?: string | null) {
+  return turnStatus === "debouncing" && (!lockedUntil || new Date(lockedUntil).getTime() > Date.now());
+}
+
 async function handleLineText(event: LineWebhookEvent) {
   const lineUserId = event.source?.userId;
   const replyToken = event.replyToken;
+  const lineMessageId = event.message?.id;
   const text = event.message?.text?.trim();
 
-  if (!lineUserId || !replyToken || !text) {
+  if (!lineUserId || !replyToken || !lineMessageId || !text) {
     return;
   }
 
@@ -53,27 +86,98 @@ async function handleLineText(event: LineWebhookEvent) {
     actorId,
   });
 
-  const { text: answer, sessionState } = await collectAgentTextResponse(
-    {
-      input_type: "text",
-      response_format: "jsonl",
-      channel: "line",
-      session_id: session.agent_session_id,
-      user_id: actorId,
-      line_reply_token: replyToken,
-      prompt: text,
-    },
-    session.agent_session_id,
-  );
+  const registeredEvent = await registerLineTextMessageEvent({
+    lineMessageId,
+    lineUserId,
+    chatSessionId: session.id,
+    agentSessionId: session.agent_session_id,
+    replyToken,
+    messageText: text,
+  });
 
-  if (sessionState?.session_ended === true) {
-    await markChatSessionEnded(session.agent_session_id, "ended");
-    await stopAgentRuntimeSession(session.agent_session_id);
-  } else {
-    await touchChatSession(session.agent_session_id);
+  if (!registeredEvent.inserted) {
+    return;
   }
 
-  await replyLineText(replyToken, answer);
+  const debouncedSession = await startLineDebounceTurn(session.agent_session_id);
+
+  if (!debouncedSession) {
+    const currentSession = await readChatSessionByAgentSessionId(session.agent_session_id);
+
+    if (shouldLeaveForDebounce(currentSession?.turn_status, currentSession?.locked_until)) {
+      return;
+    }
+
+    await markLineMessageEventDropped(lineMessageId);
+    return;
+  }
+
+  let turnClosed = false;
+
+  try {
+    await wait(LINE_DEBOUNCE_MS);
+
+    const processingSession = await markLineTurnProcessing(session.agent_session_id);
+
+    if (!processingSession) {
+      await markLineMessageEventDropped(lineMessageId);
+      await releaseLineTurn(session.agent_session_id);
+      return;
+    }
+
+    const cutoffIso = new Date().toISOString();
+    const debouncedEvents = await claimLineDebouncedTextEvents({
+      chatSessionId: session.id,
+      lineUserId,
+      cutoffIso,
+    });
+    const prompt = debouncedEvents
+      .map((debouncedEvent) => debouncedEvent.message_text.trim())
+      .filter(Boolean)
+      .join("\n");
+
+    if (!prompt) {
+      await finishLineTurn(session.agent_session_id);
+      turnClosed = true;
+      return;
+    }
+
+    const responseReplyToken = debouncedEvents[0]?.reply_token ?? replyToken;
+
+    const { text: answer, sessionState } = await collectAgentTextResponse(
+      {
+        input_type: "text",
+        response_format: "jsonl",
+        channel: "line",
+        session_id: session.agent_session_id,
+        user_id: actorId,
+        line_reply_token: responseReplyToken,
+        prompt,
+      },
+      session.agent_session_id,
+    );
+
+    await markLineMessageEventsProcessed(
+      debouncedEvents.map((debouncedEvent) => debouncedEvent.line_message_id),
+    );
+
+    if (sessionState?.session_ended === true) {
+      await markChatSessionEnded(session.agent_session_id, "ended");
+      await stopAgentRuntimeSession(session.agent_session_id);
+      turnClosed = true;
+    } else {
+      await finishLineTurn(session.agent_session_id);
+      turnClosed = true;
+    }
+
+    await replyLineText(responseReplyToken, answer);
+  } catch (error) {
+    if (!turnClosed) {
+      await releaseLineTurn(session.agent_session_id);
+    }
+
+    throw error;
+  }
 }
 
 async function handleLineVoiceFallback(event: LineWebhookEvent) {
@@ -110,9 +214,9 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "Invalid LINE webhook body" }, { status: 400 });
   }
 
-  for (const event of payload.events ?? []) {
+  await Promise.all((payload.events ?? []).map(async (event) => {
     if (event.type !== "message") {
-      continue;
+      return;
     }
 
     try {
@@ -131,7 +235,7 @@ export async function POST(request: NextRequest) {
         );
       }
     }
-  }
+  }));
 
   return Response.json({ ok: true });
 }
