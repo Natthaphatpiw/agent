@@ -405,7 +405,7 @@ export async function markLineMessageEventsProcessed(lineMessageIds: string[]) {
   }
 }
 
-async function createChatSession(channel: ChatChannel, actorId: string) {
+export async function createChatSession(channel: ChatChannel, actorId: string) {
   const supabase = getSupabaseAdmin();
   const now = new Date().toISOString();
   const { data, error } = await supabase

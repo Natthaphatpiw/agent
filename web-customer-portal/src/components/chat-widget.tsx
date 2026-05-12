@@ -5,6 +5,7 @@ import {
   Bot,
   CircleStop,
   Loader2,
+  Maximize2,
   MessageCircle,
   Mic,
   MicOff,
@@ -12,6 +13,8 @@ import {
   Send,
   X,
 } from "lucide-react";
+
+import { AuthenticatedChatModal } from "@/components/authenticated-chat-modal";
 
 type ChatMessage = {
   id: string;
@@ -125,6 +128,7 @@ function dataRecord(data: unknown) {
 
 export function ChatWidget() {
   const [open, setOpen] = useState(false);
+  const [expandedOpen, setExpandedOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [loading, setLoading] = useState(false);
@@ -471,9 +475,10 @@ export function ChatWidget() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-3 md:bottom-5 md:right-5">
-      {open ? (
-        <section className="flex h-[min(560px,calc(100vh-6.5rem))] w-[min(390px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+    <>
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-3 md:bottom-5 md:right-5">
+        {open ? (
+          <section className="flex h-[min(560px,calc(100vh-6.5rem))] w-[min(390px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
           <header className="flex items-center justify-between border-b border-slate-200 bg-slate-950 px-3.5 py-3 text-white">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-md bg-teal-500">
@@ -497,6 +502,15 @@ export function ChatWidget() {
                   className={["h-4 w-4", resetting ? "animate-spin" : ""].join(" ")}
                   aria-hidden="true"
                 />
+              </button>
+              <button
+                type="button"
+                onClick={() => setExpandedOpen(true)}
+                title="ขยายแชท"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-200 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/50"
+                aria-label="ขยายแชท"
+              >
+                <Maximize2 className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -596,18 +610,20 @@ export function ChatWidget() {
               </button>
             </div>
           </form>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="inline-flex items-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-xl transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-        aria-label="เปิดแชท"
-      >
-        <MessageCircle className="h-5 w-5" aria-hidden="true" />
-        ถามผู้ช่วย
-      </button>
-    </div>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          className="inline-flex items-center gap-2 rounded-md bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-xl transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          aria-label="เปิดแชท"
+        >
+          <MessageCircle className="h-5 w-5" aria-hidden="true" />
+          ถามผู้ช่วย
+        </button>
+      </div>
+      <AuthenticatedChatModal open={expandedOpen} onClose={() => setExpandedOpen(false)} />
+    </>
   );
 }
